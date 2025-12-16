@@ -24,7 +24,9 @@ LOCAL_POST_INSTALL_CMD += $(hide) if [ -e "$(TARGET_RECOVERY_ROOT_OUT)/system/bi
 							rm $(TARGET_RECOVERY_ROOT_OUT)/system/bin/fgrep; fi; ln -s $(TARGET_RECOVERY_ROOT_OUT)/system/bin/grep $(TARGET_RECOVERY_ROOT_OUT)/system/bin/fgrep;
 
 ifneq ($(wildcard external/zip/Android.mk),)
+ifneq ($(TW_EXCLUDE_ZIP), true)
 	RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_OPTIONAL_EXECUTABLES)/zip
+endif
 endif
 ifneq ($(wildcard external/unzip/Android.mk),)
 	RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_OPTIONAL_EXECUTABLES)/unzip
@@ -273,6 +275,7 @@ ifeq ($(TW_INCLUDE_CRYPTO), true)
 endif
 ifneq ($(filter $(TW_INCLUDE_CRYPTO) $(TW_SUPPORT_INPUT_AIDL_HAPTICS), true),)
     RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V2-cpp.so
+    RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V2-ndk.so
     RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V2-ndk_platform.so
 endif
 ifeq ($(AB_OTA_UPDATER), true)
@@ -574,4 +577,3 @@ ifneq ($(TW_EXCLUDE_BASH), true)
         ln -sf /system/bin/bash $(TARGET_RECOVERY_ROOT_OUT)/sbin/bash;
 	include $(BUILD_PHONY_PACKAGE)
 endif
-

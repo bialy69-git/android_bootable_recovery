@@ -168,6 +168,7 @@ enum TW_FSTAB_FLAGS {
 	TWFLAG_DM_USE_ORIGINAL_PATH,
 	TWFLAG_FS_COMPRESS,
 	TWFLAG_LOGICAL,
+	TWFLAG_METADATA_CSUM,
 };
 
 /* Flags without a trailing '=' are considered dual format flags and can be
@@ -218,6 +219,7 @@ const struct flag_list tw_flags[] = {
 	{ "dm_use_original_path",   TWFLAG_DM_USE_ORIGINAL_PATH },
 	{ "fscompress",             TWFLAG_FS_COMPRESS },
 	{ "logical",                TWFLAG_LOGICAL },
+	{ "metadata_csum",          TWFLAG_METADATA_CSUM },
 	{ 0,                        0 },
 };
 
@@ -286,6 +288,7 @@ TWPartition::TWPartition() {
 	Original_Path = "";
 	Use_Original_Path = false;
 	Needs_Fs_Compress = false;
+	Needs_Metadata_Csum = false;
 }
 
 TWPartition::~TWPartition(void) {
@@ -1080,6 +1083,9 @@ void TWPartition::Apply_TW_Flag(const unsigned flag, const char* str, const bool
 				LOGINFO("Ignoring the 'fscompress' fstab flag\n");
 			#endif
 			break;
+		case TWFLAG_METADATA_CSUM:
+			Needs_Metadata_Csum = true;
+			break;
 		default:
 			// Should not get here
 			LOGINFO("Flag identified for processing, but later unmatched: %i\n", flag);
@@ -1289,6 +1295,7 @@ void TWPartition::Setup_Data_Media() {
         backup_exclusions.add_absolute_dir("/data/misc/apexdata/com.android.art"); // exclude this dir to prevent "error 255" on AOSP Android 12
 		backup_exclusions.add_absolute_dir("/data/extm"); //exclude this dir to prevent "error 255" on MIUI
 		backup_exclusions.add_absolute_dir("/data/gsi"); // Contains huge files (DSU System image + Userdata image), and won't work after restoration (requires configuration files in metadata)
+		backup_exclusions.add_absolute_dir("/data/adb/ksu/modules.img"); //After ksu 0.8.x the modules.img file became 1tb, which is inhibiting the execution of backups
 		wipe_exclusions.add_absolute_dir(Mount_Point + "/misc/vold"); // adopted storage keys
 		ExcludeAll(Mount_Point + "/system/storage.xml");
 
@@ -2299,7 +2306,11 @@ bool TWPartition::Wipe_EXTFS(string File_System) {
 	gui_msg(Msg("formatting_using=Formatting {1} using {2}...")(Display_Name)("mke2fs"));
 
 	// Execute mke2fs to create empty ext4 filesystem
-	Command = "mke2fs -t " + File_System + " -b 4096 " + Actual_Block_Device + " " + size_str;
+	Command = "mke2fs -t " + File_System + " -b 4096 -I 512";
+	if (Needs_Metadata_Csum) {
+		Command += " -O metadata_csum,64bit,extent";
+	}
+	Command += " " + Actual_Block_Device + " " + size_str;
 	LOGINFO("mke2fs command: %s\n", Command.c_str());
 	ret = TWFunc::Exec_Cmd(Command);
 	if (ret) {
@@ -2509,7 +2520,6 @@ bool TWPartition::Wipe_F2FS() {
 
 	bool NeedPreserveFooter = true;
 	bool needs_casefold = false;
-  	bool needs_projid = false;
 
 	Find_Actual_Block_Device();
 	if (!Is_Present) {
@@ -2518,8 +2528,10 @@ bool TWPartition::Wipe_F2FS() {
 		return false;
 	}
 
-	needs_casefold = android::base::GetBoolProperty("external_storage.casefold.enabled", false);
-	needs_projid = android::base::GetBoolProperty("external_storage.projid.enabled", false);
+	if (Mount_Point == "/data") {
+		needs_casefold = android::base::GetBoolProperty("external_storage.casefold.enabled", false);
+	}
+
 	unsigned long long dev_sz = TWFunc::IOCTL_Get_Block_Size(Actual_Block_Device.c_str());
 	if (!dev_sz)
 		return false;
@@ -2528,8 +2540,9 @@ bool TWPartition::Wipe_F2FS() {
 		Length < 0 ? dev_sz += Length : dev_sz -= CRYPT_FOOTER_OFFSET;
 	char dev_sz_str[48];
 	sprintf(dev_sz_str, "%llu", (dev_sz / 4096));
-	if(needs_projid)
-		f2fs_command += " -O project_quota,extra_attr";
+
+	// Project ID
+	f2fs_command += " -O project_quota,extra_attr";
 
 	if(needs_casefold)
 		f2fs_command += " -O casefold -C utf8";
